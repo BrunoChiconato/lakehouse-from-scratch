@@ -1,5 +1,5 @@
-pyspark==3.4.1
+pyspark==3.5.1
 boto3
 requests
 python-dotenv
-arxiv
+
