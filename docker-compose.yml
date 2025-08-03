@@ -1,6 +1,6 @@
 services:
   spark-dev:
-    image: python:3.13-slim
+    build: .
     container_name: spark-dev-container
     working_dir: /app
     volumes:
