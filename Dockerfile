@@ -10,5 +10,6 @@ RUN apt-get update && apt-get install -y \
 ENV JAVA_HOME /usr/lib/jvm/java-11-openjdk-amd64
 
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
