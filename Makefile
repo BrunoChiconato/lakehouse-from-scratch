@@ -1,9 +1,8 @@
 #!/usr/bin/bash
 
 SERVICE_NAME=spark-dev
-
-SPARK_SUBMIT_CMD = /usr/local/bin/spark-submit \
-	--packages org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.4.2,software.amazon.awssdk:bundle:2.17.257,org.apache.hadoop:hadoop-aws:3.3.4
+SPARK_PACKAGES = org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.4.2,software.amazon.awssdk:bundle:2.17.257,org.apache.hadoop:hadoop-aws:3.3.4
+SPARK_SUBMIT_CMD = spark-submit --packages $(SPARK_PACKAGES)
 
 .PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline
 
@@ -12,7 +11,7 @@ default: help
 help:
 	@echo "Available commands:"
 	@echo "  --- Environment Control ---"
-	@echo "  make build         	- Build the Docker image and install dependencies"
+	@echo "  make build         	- Build the Docker image with all dependencies"
 	@echo "  make up            	- Start Docker services in the background"
 	@echo "  make down          	- Stop and remove Docker containers"
 	@echo "  make logs          	- Follow service logs"
@@ -29,10 +28,8 @@ help:
 	@echo "  make run_full_pipeline 	- Run all ETL steps in sequence (Bronze -> Silver -> Gold)"
 
 build:
-	@echo "--> Building and starting Docker environment..."
+	@echo "--> Building Docker environment (dependencies will be baked into the image)..."
 	docker-compose up -d --build
-	@echo "--> Installing Python dependencies..."
-	docker-compose exec $(SERVICE_NAME) pip install -r requirements.txt
 	@echo "--> Environment is ready!"
 
 up:
@@ -72,8 +69,5 @@ gold:
 	@echo "--> STEP 3: Building aggregated Gold layer tables..."
 	docker-compose exec $(SERVICE_NAME) $(SPARK_SUBMIT_CMD) src/build_gold_layer.py
 
-run_full_pipeline:
-	@echo "--> EXECUTING FULL ETL PIPELINE: BRONZE, SILVER, GOLD..."
-	@$(MAKE) bronze && $(MAKE) silver && $(MAKE) gold
+run_full_pipeline: bronze silver gold
 	@echo "--> Full ETL pipeline finished successfully."
-
