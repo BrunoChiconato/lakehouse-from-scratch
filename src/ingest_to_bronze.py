@@ -7,13 +7,26 @@ import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
 
 
+load_dotenv()
+
+
+S3_BUCKET = os.getenv("S3_BUCKET_NAME")
+ARXIV_BASE_URL = "http://export.arxiv.org/api/query"
+ARXIV_SEARCH_QUERY = os.getenv(
+    "ARXIV_SEARCH_QUERY", "cat:cs.AI OR cat:cs.LG OR cat:cs.CL"
+)
+ARXIV_MAX_RESULTS = int(os.getenv("ARXIV_MAX_RESULTS", 150))
+ARXIV_SORT_BY = "submittedDate"
+ARXIV_SORT_ORDER = "descending"
+
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
 def parse_entry(entry, namespace):
-    """Helper function to parse a single XML entry into a dictionary."""
+    """Função auxiliar para converter uma entrada XML em um dicionário Python."""
     return {
         "id": entry.find(f"{namespace}id").text.split("/")[-1],
         "title": entry.find(f"{namespace}title").text,
@@ -35,29 +48,26 @@ def parse_entry(entry, namespace):
 
 def main():
     """
-    Main function to extract data directly from the arXiv API using requests.
+    Função principal para extrair dados da API do arXiv e salvá-los na camada Bronze.
     """
-    load_dotenv()
-    s3_bucket = os.getenv("S3_BUCKET_NAME")
-    if not s3_bucket:
-        logging.error("S3_BUCKET_NAME not set.")
+    if not S3_BUCKET:
+        logging.error("Variável de ambiente S3_BUCKET_NAME não definida.")
         return
 
     s3_client = boto3.client("s3")
-    logging.info(f"Connected to S3, target bucket: {s3_bucket}")
+    logging.info(f"Conectado ao S3. Bucket de destino: {S3_BUCKET}")
 
-    base_url = "http://export.arxiv.org/api/query"
     params = {
-        "search_query": "cat:cs.AI OR cat:cs.LG OR cat:cs.CL",
-        "sortBy": "submittedDate",
-        "sortOrder": "descending",
+        "search_query": ARXIV_SEARCH_QUERY,
+        "sortBy": ARXIV_SORT_BY,
+        "sortOrder": ARXIV_SORT_ORDER,
         "start": 0,
-        "max_results": 150,
+        "max_results": ARXIV_MAX_RESULTS,
     }
 
-    logging.info(f"Requesting {params['max_results']} articles from arXiv API...")
+    logging.info(f"Requisitando {params['max_results']} artigos da API do arXiv...")
     try:
-        response = requests.get(base_url, params=params)
+        response = requests.get(ARXIV_BASE_URL, params=params)
         response.raise_for_status()
 
         root = ET.fromstring(response.content)
@@ -70,20 +80,20 @@ def main():
             file_key = f"bronze/articles/{safe_id}.json"
 
             s3_client.put_object(
-                Bucket=s3_bucket,
+                Bucket=S3_BUCKET,
                 Key=file_key,
                 Body=json.dumps(article_data, indent=4, ensure_ascii=False),
             )
             article_count += 1
 
-        logging.info(f"Extraction complete. Total of {article_count} articles saved.")
+        logging.info(f"Extração concluída. Total de {article_count} artigos salvos.")
 
     except requests.exceptions.RequestException as e:
-        logging.error(f"HTTP request to arXiv API failed: {e}")
+        logging.error(f"Requisição HTTP para a API do arXiv falhou: {e}")
     except ET.ParseError as e:
-        logging.error(f"Failed to parse XML response: {e}")
+        logging.error(f"Falha ao processar o XML da resposta: {e}")
     except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
+        logging.error(f"Um erro inesperado ocorreu: {e}")
 
 
 if __name__ == "__main__":
