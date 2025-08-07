@@ -1,8 +1,8 @@
 #!/usr/bin/bash
 
 SERVICE_NAME=spark-dev
-SPARK_PACKAGES = org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.4.2,software.amazon.awssdk:bundle:2.17.257,org.apache.hadoop:hadoop-aws:3.3.4
-SPARK_SUBMIT_CMD = spark-submit --packages $(SPARK_PACKAGES)
+
+SPARK_SUBMIT_CMD = spark-submit --packages $$SPARK_PACKAGES
 
 .PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline
 
@@ -16,7 +16,7 @@ help:
 	@echo "  make down          	- Stop and remove Docker containers"
 	@echo "  make logs          	- Follow service logs"
 	@echo "  make shell         	- Open an interactive shell inside the development container"
-	@echo "  make clean         	- Remove __pycache__ and .pyc files"
+	@echo "  make clean         	- Remove __pycache__ and .ruff_cache dirs and .pyc files"
 	@echo "  make linter      	- Run linter and formatter (Ruff) on the project"
 	@echo ""
 	@echo "  --- ETL Pipeline Steps ---"
@@ -28,25 +28,24 @@ help:
 	@echo "  make run_full_pipeline 	- Run all ETL steps in sequence (Bronze -> Silver -> Gold)"
 
 build:
-	@echo "--> Building Docker environment (dependencies will be baked into the image)..."
-	docker-compose up -d --build
-	@echo "--> Environment is ready!"
+	@echo "--> Building Docker environment..."
+	docker compose build
 
 up:
 	@echo "--> Starting Docker services..."
-	docker-compose up -d
+	docker compose up -d
 
 down:
 	@echo "--> Stopping Docker services..."
-	docker-compose down
+	docker compose down --volumes
 
 logs:
 	@echo "--> Following logs..."
-	docker-compose logs -f
+	docker compose logs -f
 
 shell:
 	@echo "--> Accessing container shell..."
-	docker-compose exec $(SERVICE_NAME) bash
+	docker compose exec $(SERVICE_NAME) bash
 
 clean:
 	@echo "--> Cleaning up temporary files..."
@@ -60,15 +59,15 @@ linter:
 
 bronze:
 	@echo "--> STEP 1: Ingesting raw data to Bronze layer..."
-	docker-compose exec $(SERVICE_NAME) python src/ingest_to_bronze.py
+	docker compose exec $(SERVICE_NAME) python src/ingest_to_bronze.py
 
 silver:
 	@echo "--> STEP 2: Processing data from Bronze to Silver layer..."
-	docker-compose exec $(SERVICE_NAME) $(SPARK_SUBMIT_CMD) src/process_to_silver.py
+	docker compose exec $(SERVICE_NAME) $(SPARK_SUBMIT_CMD) src/process_to_silver.py
 
 gold:
 	@echo "--> STEP 3: Building aggregated Gold layer tables..."
-	docker-compose exec $(SERVICE_NAME) $(SPARK_SUBMIT_CMD) src/build_gold_layer.py
+	docker compose exec $(SERVICE_NAME) $(SPARK_SUBMIT_CMD) src/build_gold_layer.py
 
 run_full_pipeline: bronze silver gold
 	@echo "--> Full ETL pipeline finished successfully."
