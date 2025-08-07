@@ -1,26 +1,30 @@
 import os
-import logging
+from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, count, explode
 from utils.spark_utils import get_spark_session
 
-SILVER_TABLE_NAME = "lakehouse_catalog.arxiv_db.papers"
-YEARLY_STATS_TABLE = "lakehouse_catalog.analytics.yearly_publication_stats"
-AUTHOR_SUMMARY_TABLE = "lakehouse_catalog.analytics.author_summary"
+
 S3_BUCKET = os.getenv("S3_BUCKET_NAME")
-WAREHOUSE_PATH = f"s3a://{S3_BUCKET}/gold/"
+CATALOG_NAME = os.getenv("SPARK_CATALOG_NAME", "lakehouse_catalog")
+
+SILVER_DB = "arxiv_db"
+SILVER_TABLE = "papers"
+SILVER_TABLE_FQN = f"{CATALOG_NAME}.{SILVER_DB}.{SILVER_TABLE}"
+
+GOLD_DB = "analytics"
+YEARLY_STATS_TABLE = "yearly_publication_stats"
+AUTHOR_SUMMARY_TABLE = "author_summary"
+YEARLY_STATS_TABLE_FQN = f"{CATALOG_NAME}.{GOLD_DB}.{YEARLY_STATS_TABLE}"
+AUTHOR_SUMMARY_TABLE_FQN = f"{CATALOG_NAME}.{GOLD_DB}.{AUTHOR_SUMMARY_TABLE}"
 
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+def setup_database(spark: SparkSession, db_name: str) -> None:
+    """Ensures the database exists in the catalog."""
+    spark.sql(f"CREATE DATABASE IF NOT EXISTS {CATALOG_NAME}.{db_name}")
 
 
-def create_yearly_publication_stats(spark):
-    """Cria uma tabela Gold com contagem de publicações por ano e categoria."""
-    logging.info(f"Construindo tabela Gold: {YEARLY_STATS_TABLE}")
-
-    papers_df = spark.table(SILVER_TABLE_NAME)
-
+def create_yearly_publication_stats(papers_df: DataFrame, table_name: str) -> None:
+    """Creates a Gold table with publication counts per year and category."""
     stats_df = (
         papers_df.withColumn("category", explode(col("categories")))
         .groupBy("publication_year", "category")
@@ -28,21 +32,16 @@ def create_yearly_publication_stats(spark):
         .orderBy(col("publication_year").desc(), col("paper_count").desc())
     )
 
-    spark.sql(
-        f"CREATE DATABASE IF NOT EXISTS {YEARLY_STATS_TABLE.split('.')[0]}.{YEARLY_STATS_TABLE.split('.')[1]}"
+    (
+        stats_df.write.mode("overwrite")
+        .option("overwriteSchema", "true")
+        .partitionBy("publication_year")
+        .saveAsTable(table_name)
     )
-    stats_df.write.mode("overwrite").partitionBy("publication_year").saveAsTable(
-        YEARLY_STATS_TABLE
-    )
-    logging.info(f"Tabela Gold criada com sucesso: {YEARLY_STATS_TABLE}")
 
 
-def create_author_summary(spark):
-    """Cria uma tabela Gold com o resumo de publicações por autor."""
-    logging.info(f"Construindo tabela Gold: {AUTHOR_SUMMARY_TABLE}")
-
-    papers_df = spark.table(SILVER_TABLE_NAME)
-
+def create_author_summary(papers_df: DataFrame, table_name: str) -> None:
+    """Creates a Gold table summarizing publications per author."""
     author_df = (
         papers_df.withColumn("author_name", explode(col("authors")))
         .groupBy("author_name")
@@ -50,24 +49,39 @@ def create_author_summary(spark):
         .orderBy(col("total_papers").desc())
     )
 
-    spark.sql(
-        f"CREATE DATABASE IF NOT EXISTS {AUTHOR_SUMMARY_TABLE.split('.')[0]}.{AUTHOR_SUMMARY_TABLE.split('.')[1]}"
+    (
+        author_df.write.mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(table_name)
     )
-    author_df.write.mode("overwrite").saveAsTable(AUTHOR_SUMMARY_TABLE)
-    logging.info(f"Tabela Gold criada com sucesso: {AUTHOR_SUMMARY_TABLE}")
 
 
-def main():
-    """Função principal para construir todas as tabelas da camada Gold."""
+def main() -> None:
+    """Main function to build all Gold layer aggregated tables."""
     if not S3_BUCKET:
-        logging.error("S3_BUCKET_NAME não encontrada.")
+        print("Error: S3_BUCKET_NAME environment variable not set. Aborting.")
         return
 
-    spark = get_spark_session("SilverToGold", WAREHOUSE_PATH)
+    spark = get_spark_session("SilverToGold")
+    logger = spark.sparkContext._jvm.org.apache.log4j.LogManager.getLogger(__name__)
 
-    create_yearly_publication_stats(spark)
-    create_author_summary(spark)
+    setup_database(spark, GOLD_DB)
+    logger.info(f"Database '{GOLD_DB}' is ready.")
 
+    logger.info(f"Reading data from Silver table: {SILVER_TABLE_FQN}")
+
+    papers_df = spark.table(SILVER_TABLE_FQN).cache()
+    logger.info("Silver table loaded and cached.")
+
+    logger.info(f"Building Gold table: {YEARLY_STATS_TABLE_FQN}")
+    create_yearly_publication_stats(papers_df, YEARLY_STATS_TABLE_FQN)
+    logger.info("Successfully created yearly publication stats table.")
+
+    logger.info(f"Building Gold table: {AUTHOR_SUMMARY_TABLE_FQN}")
+    create_author_summary(papers_df, AUTHOR_SUMMARY_TABLE_FQN)
+    logger.info("Successfully created author summary table.")
+
+    spark.catalog.clearCache()
     spark.stop()
 
 
