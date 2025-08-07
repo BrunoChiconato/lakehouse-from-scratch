@@ -51,7 +51,8 @@ shell:
 clean:
 	@echo "--> Cleaning up temporary files..."
 	find . -type f -name "*.pyc" -delete
-	find . -type d -name "__pycache__" -delete
+	find . -type d -name "__pycache__" -exec rm -rf {} +
+	find . -type d -name ".ruff_cache" -exec rm -rf {} +
 
 linter:
 	@echo "--> Linting and formatting code with Ruff..."
