@@ -1,10 +1,12 @@
 services:
   spark-dev:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: spark-dev-container
     working_dir: /app
     volumes:
-      - .:/app
+      - ./src:/app/src
     env_file:
       - .env
     command: tail -f /dev/null
