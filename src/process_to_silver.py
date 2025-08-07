@@ -1,22 +1,28 @@
 import os
-import logging
+from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, year, to_date
 from utils.spark_utils import get_spark_session
 
 
-SILVER_TABLE_NAME = "lakehouse_catalog.arxiv_db.papers"
 S3_BUCKET = os.getenv("S3_BUCKET_NAME")
+CATALOG_NAME = os.getenv("SPARK_CATALOG_NAME", "lakehouse_catalog")
+DB_NAME = "arxiv_db"
+TABLE_NAME = "papers"
+SILVER_TABLE_FQN = f"{CATALOG_NAME}.{DB_NAME}.{TABLE_NAME}"
+
 BRONZE_PATH = f"s3a://{S3_BUCKET}/bronze/articles/"
-SILVER_WAREHOUSE_PATH = f"s3a://{S3_BUCKET}/silver/"
 
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+def setup_database(spark: SparkSession, db_name: str) -> None:
+    """Ensures the database exists in the catalog."""
+    spark.sql(f"CREATE DATABASE IF NOT EXISTS {CATALOG_NAME}.{db_name}")
 
 
-def transform_raw_data(spark, path):
-    """Lê e transforma os dados brutos da camada Bronze."""
+def transform_raw_data(spark: SparkSession, path: str) -> DataFrame:
+    """
+    Reads raw JSON data from the Bronze layer and applies transformations.
+    This function defines the schema contract for the Silver layer.
+    """
     df_raw = spark.read.option("multiline", "true").json(path)
 
     df_transformed = df_raw.select(
@@ -33,10 +39,10 @@ def transform_raw_data(spark, path):
     return df_transformed
 
 
-def upsert_to_silver(spark, df, table_name):
+def upsert_to_silver(spark: SparkSession, df: DataFrame, table_name: str) -> None:
     """
-    Realiza o MERGE (upsert) dos dados na tabela Silver do Iceberg.
-    Cria a tabela se ela não existir.
+    Performs an idempotent MERGE (upsert) operation into the Silver Iceberg table.
+    It creates or updates records based on the 'id' column.
     """
     df.createOrReplaceTempView("source_papers")
 
@@ -49,32 +55,31 @@ def upsert_to_silver(spark, df, table_name):
     WHEN NOT MATCHED THEN
         INSERT *
     """
-
-    logging.info(f"Executando MERGE na tabela: {table_name}")
     spark.sql(merge_sql)
 
 
-def main():
-    """Main function for the Bronze to Silver ETL job."""
+def main() -> None:
+    """Main ETL job to process data from Bronze to the Silver layer."""
     if not S3_BUCKET:
-        logging.error("S3_BUCKET_NAME não encontrada. Verifique seu arquivo .env.")
+        print("Error: S3_BUCKET_NAME environment variable not set. Aborting.")
         return
 
-    spark = get_spark_session("BronzeToSilver", SILVER_WAREHOUSE_PATH)
-    logging.info("Spark Session criada com sucesso.")
+    spark = get_spark_session("BronzeToSilver")
+    logger = spark.sparkContext._jvm.org.apache.log4j.LogManager.getLogger(__name__)
+    logger.info("Spark Session created successfully.")
 
-    spark.sql(
-        f"CREATE DATABASE IF NOT EXISTS {SILVER_TABLE_NAME.split('.')[0]}.{SILVER_TABLE_NAME.split('.')[1]}"
-    )
+    setup_database(spark, DB_NAME)
+    logger.info(f"Database '{DB_NAME}' is ready.")
 
     df_transformed = transform_raw_data(spark, BRONZE_PATH)
-    logging.info(
-        f"Lidos e transformados {df_transformed.count()} registros de {BRONZE_PATH}"
-    )
 
-    upsert_to_silver(spark, df_transformed, SILVER_TABLE_NAME)
+    record_count = df_transformed.count()
+    logger.info(f"Read and transformed {record_count} records from {BRONZE_PATH}")
 
-    logging.info("Processo de MERGE na tabela Silver concluído com sucesso.")
+    logger.info(f"Executing MERGE into Silver table: {SILVER_TABLE_FQN}")
+    upsert_to_silver(spark, df_transformed, SILVER_TABLE_FQN)
+    logger.info("MERGE process into Silver table completed successfully.")
+
     spark.stop()
 
 
