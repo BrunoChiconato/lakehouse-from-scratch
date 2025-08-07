@@ -30,7 +30,6 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 
 COPY src ./src
-COPY .env .
 
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 RUN chown -R appuser:appgroup /app
