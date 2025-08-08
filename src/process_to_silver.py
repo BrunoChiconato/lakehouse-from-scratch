@@ -39,6 +39,34 @@ def transform_raw_data(spark: SparkSession, path: str) -> DataFrame:
     return df_transformed
 
 
+def create_table_if_not_exists(spark: SparkSession, table_name: str) -> None:
+    """
+    Creates the Silver Iceberg table with an explicit schema if it does not already exist.
+    This approach is robust and acts as a clear data contract.
+    The table is partitioned by publication_year for query optimization.
+
+    Args:
+        spark: The SparkSession object.
+        table_name: The fully qualified name of the table to create.
+    """
+    create_table_sql = f"""
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        id STRING,
+        title STRING,
+        summary STRING,
+        authors ARRAY<STRING>,
+        categories ARRAY<STRING>,
+        published_date DATE,
+        updated_date DATE,
+        pdf_url STRING,
+        publication_year INT
+    )
+    USING iceberg
+    PARTITIONED BY (publication_year)
+    """
+    spark.sql(create_table_sql)
+
+
 def upsert_to_silver(spark: SparkSession, df: DataFrame, table_name: str) -> None:
     """
     Performs an idempotent MERGE (upsert) operation into the Silver Iceberg table.
@@ -72,9 +100,11 @@ def main() -> None:
     logger.info(f"Database '{DB_NAME}' is ready.")
 
     df_transformed = transform_raw_data(spark, BRONZE_PATH)
-
     record_count = df_transformed.count()
     logger.info(f"Read and transformed {record_count} records from {BRONZE_PATH}")
+
+    create_table_if_not_exists(spark, SILVER_TABLE_FQN)
+    logger.info(f"Table '{SILVER_TABLE_FQN}' is ready.")
 
     logger.info(f"Executing MERGE into Silver table: {SILVER_TABLE_FQN}")
     upsert_to_silver(spark, df_transformed, SILVER_TABLE_FQN)
