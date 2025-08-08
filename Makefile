@@ -1,8 +1,11 @@
 #!/usr/bin/bash
 
 SERVICE_NAME=spark-dev
+ENV_FILE=--env-file .env
 
-SPARK_SUBMIT_CMD = spark-submit --packages $$SPARK_PACKAGES
+DOCKER_EXEC_CMD = docker compose $(ENV_FILE) exec $(SERVICE_NAME)
+
+SPARK_CMD_PREFIX = spark-submit --packages "$$SPARK_PACKAGES"
 
 .PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline
 
@@ -45,7 +48,7 @@ logs:
 
 shell:
 	@echo "--> Accessing container shell..."
-	docker compose exec $(SERVICE_NAME) bash
+	$(DOCKER_EXEC_CMD) bash
 
 clean:
 	@echo "--> Cleaning up temporary files..."
@@ -55,19 +58,20 @@ clean:
 
 linter:
 	@echo "--> Linting and formatting code with Ruff..."
-	ruff check . --fix && ruff format .
+	ruff check . --fix
+	ruff format .
 
 bronze:
 	@echo "--> STEP 1: Ingesting raw data to Bronze layer..."
-	docker compose exec $(SERVICE_NAME) python src/ingest_to_bronze.py
+	$(DOCKER_EXEC_CMD) python src/ingest_to_bronze.py
 
 silver:
 	@echo "--> STEP 2: Processing data from Bronze to Silver layer..."
-	docker compose exec $(SERVICE_NAME) $(SPARK_SUBMIT_CMD) src/process_to_silver.py
+	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/process_to_silver.py'
 
 gold:
 	@echo "--> STEP 3: Building aggregated Gold layer tables..."
-	docker compose exec $(SERVICE_NAME) $(SPARK_SUBMIT_CMD) src/build_gold_layer.py
+	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/build_gold_layer.py'
 
 run_full_pipeline: bronze silver gold
 	@echo "--> Full ETL pipeline finished successfully."
