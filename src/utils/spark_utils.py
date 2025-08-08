@@ -37,6 +37,7 @@ def get_spark_session(app_name: str) -> SparkSession:
         .config(f"spark.sql.catalog.{catalog_name}", catalog_impl)
         .config(f"spark.sql.catalog.{catalog_name}.type", catalog_type)
         .config(f"spark.sql.catalog.{catalog_name}.warehouse", warehouse_path)
+        .config("spark.sql.defaultCatalog", catalog_name)
         .config("spark.hadoop.fs.s3a.impl", s3_impl)
     )
 
