@@ -7,7 +7,7 @@ DOCKER_EXEC_CMD = docker compose $(ENV_FILE) exec $(SERVICE_NAME)
 
 SPARK_CMD_PREFIX = spark-submit --packages "$$SPARK_PACKAGES"
 
-.PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline
+.PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline test test-cov
 
 default: help
 
@@ -29,6 +29,11 @@ help:
 	@echo ""
 	@echo "  --- Full Pipeline Execution ---"
 	@echo "  make run_full_pipeline 	- Run all ETL steps in sequence (Bronze -> Silver -> Gold)"
+	@echo ""
+	@echo "  --- Testing ---"
+	@echo "  make test          	- Run all unit and integration tests with pytest"
+	@echo "  make test-cov      	- Run tests and generate an HTML coverage report"
+
 
 build:
 	@echo "--> Building Docker environment..."
@@ -75,3 +80,12 @@ gold:
 
 run_full_pipeline: bronze silver gold
 	@echo "--> Full ETL pipeline finished successfully."
+
+test:
+	@echo "--> Running unit and integration tests..."
+	pytest tests/
+
+test-cov:
+	@echo "--> Running tests and generating HTML coverage report..."
+	pytest --cov=src --cov-report=html tests/
+	@echo "--> Coverage report generated in 'htmlcov/' directory. Open htmlcov/index.html in your browser."
