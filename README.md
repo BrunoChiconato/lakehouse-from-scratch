@@ -1,5 +1,8 @@
 # End-to-End Data Lakehouse with Spark, Iceberg, and Snowflake
 
+[![CI/CD Pipeline](https://github.com/BrunoChiconato/lakehouse-from-scratch/actions/workflows/ci.yml/badge.svg)](https://github.com/BrunoChiconato/lakehouse-from-scratch/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/BrunoChiconato/lakehouse-from-scratch/graph/badge.svg?token=77SR34AOVH)](https://codecov.io/gh/BrunoChiconato/lakehouse-from-scratch)
+
 This end-to-end data engineering project demonstrates how to build a transactional Data Lakehouse on AWS S3 using a modern data stack. The solution ingests data from the public arXiv API, processes it through a Medallion Architecture (Bronze, Silver, Gold) with Apache Spark and Apache Iceberg, and makes it available for high-performance analytics in Snowflake.
 
 ## Table of Contents
