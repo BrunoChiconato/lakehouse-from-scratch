@@ -32,7 +32,9 @@ def parse_xml_entry(entry) -> ArxivArticle:
         ],
         "published_date": entry.find(f"{ATOM_NAMESPACE}published").text,
         "updated_date": entry.find(f"{ATOM_NAMESPACE}updated").text,
-        "pdf_url": entry.find(f'{ATOM_NAMESPACE}link[@title="pdf"]').get("href") or "",
+        "pdf_url": link.get("href")
+        if (link := entry.find(f'{ATOM_NAMESPACE}link[@title="pdf"]')) is not None
+        else "",
     }
     return ArxivArticle(**raw_data)
 
