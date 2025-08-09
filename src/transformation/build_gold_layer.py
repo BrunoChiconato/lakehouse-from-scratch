@@ -1,16 +1,13 @@
-import os
+import logging
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, count, explode
+
+from config import settings
+from utils.logging_setup import setup_logging
 from utils.spark_utils import get_spark_session
-import logging
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+setup_logging()
 logger = logging.getLogger(__name__)
-
-S3_BUCKET = os.getenv("S3_BUCKET_NAME")
-CATALOG_NAME = os.getenv("SPARK_CATALOG_NAME", "lakehouse_catalog")
 
 SILVER_DB = "arxiv_db"
 SILVER_TABLE = "papers"
@@ -18,16 +15,18 @@ GOLD_DB = "analytics"
 DIM_CATEGORIES_TABLE = "dim_categories"
 FACT_PUBLICATION_TRENDS_TABLE = "fact_publication_trends"
 
-SILVER_TABLE_FQN = f"{CATALOG_NAME}.{SILVER_DB}.{SILVER_TABLE}"
-DIM_CATEGORIES_TABLE_FQN = f"{CATALOG_NAME}.{GOLD_DB}.{DIM_CATEGORIES_TABLE}"
+SILVER_TABLE_FQN = f"{settings.SPARK_CATALOG_NAME}.{SILVER_DB}.{SILVER_TABLE}"
+DIM_CATEGORIES_TABLE_FQN = (
+    f"{settings.SPARK_CATALOG_NAME}.{GOLD_DB}.{DIM_CATEGORIES_TABLE}"
+)
 FACT_PUBLICATION_TRENDS_TABLE_FQN = (
-    f"{CATALOG_NAME}.{GOLD_DB}.{FACT_PUBLICATION_TRENDS_TABLE}"
+    f"{settings.SPARK_CATALOG_NAME}.{GOLD_DB}.{FACT_PUBLICATION_TRENDS_TABLE}"
 )
 
 
 def setup_database(spark: SparkSession, db_name: str) -> None:
     """Ensures the database exists in the catalog."""
-    spark.sql(f"CREATE DATABASE IF NOT EXISTS {CATALOG_NAME}.{db_name}")
+    spark.sql(f"CREATE DATABASE IF NOT EXISTS {settings.SPARK_CATALOG_NAME}.{db_name}")
     logger.info(f"Database '{db_name}' is ready.")
 
 
@@ -39,7 +38,10 @@ def create_categories_dimension_table(
     into human-readable names.
     """
     logger.info("Creating category dimension table.")
-    categories_data = [
+
+    categories_data = [(cat, "") for cat in settings.CATEGORIES_TO_FETCH]
+
+    category_name_map = [
         ("cs.AI", "Artificial Intelligence"),
         ("cs.CL", "Computation and Language"),
         ("cs.CC", "Computational Complexity"),
@@ -82,14 +84,16 @@ def create_categories_dimension_table(
         ("cs.SY", "Systems and Control"),
     ]
 
+    categories_data_with_names = [
+        (code, category_name_map.get(code, "Unknown")) for code, _ in categories_data
+    ]
+
     columns = ["category_code", "category_name"]
-    dim_df = spark.createDataFrame(categories_data, columns)
+    dim_df = spark.createDataFrame(categories_data_with_names, columns)
 
     logger.info(f"Saving dimension table to: {table_name_fqn}")
-    (
-        dim_df.write.mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(table_name_fqn)
+    dim_df.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(
+        table_name_fqn
     )
     return dim_df
 
@@ -129,12 +133,12 @@ def create_publication_trends_fact_table(
 
 def main() -> None:
     """Main function to build all Gold layer tables."""
-    logger.info("Starting Gold layer creation process.")
-    if not S3_BUCKET:
+    if not settings.S3_BUCKET:
         logger.error("S3_BUCKET_NAME environment variable not set. Aborting.")
         return
 
     spark = None
+    papers_df = None
     try:
         spark = get_spark_session("SilverToGold")
         logger.info("Spark session created successfully.")
@@ -148,7 +152,7 @@ def main() -> None:
 
         logger.info(f"Reading data from Silver table: {SILVER_TABLE_FQN}")
         papers_df = spark.table(SILVER_TABLE_FQN).cache()
-        logger.info("Silver table loaded and cached.")
+        logger.info(f"Silver table with {papers_df.count()} records loaded and cached.")
 
         logger.info(f"Building Gold fact table: {FACT_PUBLICATION_TRENDS_TABLE_FQN}")
         create_publication_trends_fact_table(
@@ -158,13 +162,14 @@ def main() -> None:
 
     except Exception as e:
         logger.error(f"An error occurred during the Gold layer job: {e}", exc_info=True)
+        raise
     finally:
         if spark:
-            if papers_df.is_cached:
+            if papers_df is not None and papers_df.is_cached:
                 papers_df.unpersist()
                 logger.info("Unpersisted Silver table DataFrame.")
-            logger.info("Stopping Spark session.")
             spark.stop()
+            logger.info("Spark session stopped.")
 
 
 if __name__ == "__main__":
