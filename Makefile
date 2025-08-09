@@ -63,15 +63,15 @@ linter:
 
 bronze:
 	@echo "--> STEP 1: Ingesting raw data to Bronze layer..."
-	$(DOCKER_EXEC_CMD) python src/ingest_to_bronze.py
+	$(DOCKER_EXEC_CMD) python src/ingestion/main.py
 
 silver:
 	@echo "--> STEP 2: Processing data from Bronze to Silver layer..."
-	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/process_to_silver.py'
+	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/transformation/process_to_silver.py'
 
 gold:
 	@echo "--> STEP 3: Building aggregated Gold layer tables..."
-	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/build_gold_layer.py'
+	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/transformation/build_gold_layer.py'
 
 run_full_pipeline: bronze silver gold
 	@echo "--> Full ETL pipeline finished successfully."
