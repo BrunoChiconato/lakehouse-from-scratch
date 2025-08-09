@@ -10,7 +10,7 @@ DB_NAME = "arxiv_db"
 TABLE_NAME = "papers"
 SILVER_TABLE_FQN = f"{CATALOG_NAME}.{DB_NAME}.{TABLE_NAME}"
 
-BRONZE_PATH = f"s3a://{S3_BUCKET}/bronze/articles/"
+BRONZE_PATH = f"s3a://{S3_BUCKET}/bronze/articles_parquet/"
 
 
 def setup_database(spark: SparkSession, db_name: str) -> None:
@@ -20,10 +20,10 @@ def setup_database(spark: SparkSession, db_name: str) -> None:
 
 def transform_raw_data(spark: SparkSession, path: str) -> DataFrame:
     """
-    Reads raw JSON data from the Bronze layer and applies transformations.
+    Reads compacted Parquet data from the Bronze layer and applies transformations.
     This function defines the schema contract for the Silver layer.
     """
-    df_raw = spark.read.option("multiline", "true").json(path)
+    df_raw = spark.read.parquet(path)
 
     df_transformed = df_raw.select(
         col("id"),
