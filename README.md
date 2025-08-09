@@ -1,19 +1,19 @@
 # End-to-End Data Lakehouse with Spark, Iceberg, and Snowflake
 
-A complete, end-to-end data engineering project that demonstrates how to build a transactional Data Lakehouse on AWS S3 using a modern data stack. The pipeline ingests raw data from the public arXiv API, processes it through a Bronze, Silver, and Gold Medallion Architecture using Apache Spark and Apache Iceberg, and makes it available for high-performance analytics in Snowflake.
+This end-to-end data engineering project demonstrates how to build a transactional Data Lakehouse on AWS S3 using a modern data stack. The solution ingests data from the public arXiv API, processes it through a Medallion Architecture (Bronze, Silver, Gold) with Apache Spark and Apache Iceberg, and makes it available for high-performance analytics in Snowflake.
 
 ## Table of Contents
 
-- [Highlights](#highlights)
-- [Project Architecture](#project-architecture)
-- [Technology Stack](#technology-stack)
-- [Data Flow](#data-flow)
-- [Prerequisites](#prerequisites)
-- [How to Run the Project](#how-to-run-the-project)
-- [Snowflake Integration](#snowflake-integration)
-- [Architectural Decisions](#architectural-decisions)
-- [Future Evolution & Production Readiness](#future-evolution--production-readiness)
-- [File Structure](#file-structure)
+- [Highlights](#-highlights)
+- [Project Architecture](#-project-architecture)
+- [Technology Stack](#-technology-stack)
+- [Prerequisites](#-prerequisites)
+- [Installation and Setup](#-installation-and-setup)
+- [Usage](#-usage)
+- [Project File Structure](#-project-file-structure)
+- [Snowflake Integration](#-snowflake-integration)
+- [Architectural Decisions](#-architectural-decisions)
+
 
 ## Highlights
 
@@ -27,165 +27,168 @@ This project serves as a practical implementation of several key modern data eng
 
 ## Project Architecture
 
-The project follows the Medallion Architecture, ensuring data flows from raw ingestion to business-ready tables in a reliable and governed manner.
+The project follows the Medallion Architecture to ensure a reliable and governed data flow, from ingestion to the consumption layer.
 
-1.  **Bronze Layer:** Raw XML/JSON files are ingested from the arXiv API and stored untouched in a bronze layer in S3.
-2.  **Silver Layer:** The raw data is cleaned, structured with a proper schema, and loaded into a transactional Apache Iceberg table located in a silver layer in S3.
-3.  **Gold Layer:** The clean Silver data is aggregated to create business-focused tables (e.g., yearly publication stats, author summaries) and stored as new Iceberg tables in a gold layer in S3.
+```mermaid
+graph LR
+    A[arXiv API] -->|Python Ingestion| B(Bronze Layer - S3);
+    B -->|Spark Processing| C(Silver Layer - S3);
+    C -->|Spark Aggregation| D(Gold Layer - S3);
+    D -->|External Table Query| E(Snowflake DW);
+
+    subgraph "Data Lakehouse (AWS S3)"
+        B(<b>Bronze</b><br/>Single, optimized<br/>Parquet file)
+        C(<b>Silver</b><br/>Clean, partitioned<br/>Iceberg table)
+        D(<b>Gold</b><br/>Aggregated<br/>Iceberg tables)
+    end
+```
+
+1.  **Bronze Layer:** Data from the API is ingested, validated, and saved as a single, optimized Parquet file in S3.
+2.  **Silver Layer:** The Parquet file from the Bronze layer is read by Spark, where the data is cleaned, structured with a defined schema, and loaded into a transactional, partitioned Iceberg table.
+3.  **Gold Layer:** The Silver layer tables are used as a source to create aggregated dimension and fact tables, ready for business analysis, also in Iceberg format.
 
 ## Technology Stack
 
--   **Orchestration:** Docker & Makefile
--   **Language:** Python
--   **Processing Framework:** Apache Spark
--   **Table Format:** Apache Iceberg
--   **Storage:** AWS S3
--   **Data Warehouse:** Snowflake
--   **Core Libraries:** PySpark, PyIceberg, Boto3, Requests, Ruff
-
-## Data Flow
-
-The data processing is entirely decoupled, with a local machine acting as the compute unit and AWS S3 as the persistent storage layer.
-
-1.  **Ingestion (Bronze):** The `ingest_to_bronze.py` script runs locally, fetches data from the arXiv API, and writes the raw files directly to the `bronze/` path in the S3 bucket.
-2.  **Processing (Silver):** The `process_to_silver.py` Spark job reads the raw JSON files from the `bronze/` path, cleans and transforms the data in memory, and writes it back to S3 as a partitioned Iceberg table in the `silver/` path.
-3.  **Aggregation (Gold):** The `build_gold_layer.py` Spark job reads the trusted Silver table, performs aggregations (e.g., `groupBy`, `count`), and writes the results as new, optimized Iceberg tables to the `gold/` path in S3.
-4.  **Consumption (Snowflake):** Snowflake queries the Gold layer tables directly. Through a configured Catalog Integration, it reads the Iceberg metadata from S3 to locate the necessary data files (Parquet) and execute queries performantly within its own cloud environment.
+| Tool | Purpose |
+| :--- | :--- |
+| **Docker** | Orchestration & Development Environment |
+| **Python** | Main language for ingestion and scripting |
+| **Apache Spark** | Distributed processing framework |
+| **Apache Iceberg** | Table format for the Data Lakehouse (ACID) |
+| **AWS S3** | Storage Layer (Data Lake) |
+| **Snowflake** | Data Warehouse for data consumption |
+| **Pydantic** | Data contracts and validation |
+| **Makefile** | Command-line interface for automation |
+| **Ruff** | Code linter and formatter |
 
 ## Prerequisites
 
--   AWS Account
--   IAM User with programmatic access and permissions for the S3 bucket.
--   A unique S3 Bucket to act as the Data Lake.
--   Snowflake Account
--   Docker
--   Python 3.13
+  - AWS Account
+  - IAM User with programmatic access (Access Key & Secret Key) and permissions for the S3 bucket.
+  - A unique S3 Bucket to serve as the Data Lake.
+  - Docker and Docker Compose installed.
+  - Python 3.13.
+  - Snowflake Account
 
-## How to Run the Project
+## Installation and Setup
 
-This project is orchestrated using a `Makefile` for simplicity and reproducibility.
+Follow these steps to set up the local development environment.
 
-### Setup
+1.  **Clone the Repository**
 
-1.  **Clone the repository:**
     ```bash
     git clone https://github.com/BrunoChiconato/lakehouse-from-scratch.git
     cd lakehouse-from-scratch
     ```
 
-2.  **Configure environment variables:**
-    Copy the `.env.example` to `.env` and fill in your AWS credentials and S3 bucket name.
+2.  **Configure Environment Variables**
+    Copy the `.env.example` file to a new file named `.env` and fill it with your AWS credentials and S3 bucket name.
+
     ```bash
     cp .env.example .env
-    # Edit the .env file with your credentials
     ```
 
-3.  **Build the environment:**
-    This command builds the Docker image with all necessary dependencies (Python, Java, Spark).
+    **Then, edit the `.env` file with your values.**
+
+3.  **Build the Docker Environment**
+    This command will build the Docker image containing all necessary dependencies (Python, Java, Spark, etc.).
+
     ```bash
     make build
     ```
 
-### Running the ETL Pipeline
+4.  **Start the Services**
+    This command starts the container in the background.
 
-You can run each step of the Medallion Architecture individually or the full pipeline at once.
+    ```bash
+    make up
+    ```
 
--   **Run the full pipeline (Bronze -> Silver -> Gold):**
+## Usage
+
+You can run each step of the pipeline individually or the entire flow at once using the `Makefile` commands.
+
+  - **Run the Full Pipeline (Bronze → Silver → Gold):**
+
     ```bash
     make run_full_pipeline
     ```
 
--   **Run individual steps:**
+  - **Run Individual Steps:**
+
     ```bash
-    make bronze  # Step 1: Ingest data to Bronze
-    make silver  # Step 2: Process data to Silver
-    make gold    # Step 3: Build aggregated Gold tables
+    # Step 1: Ingest data from the API to the Bronze layer
+    make bronze
+
+    # Step 2: Process data into the Silver layer
+    make silver
+
+    # Step 3: Build aggregated tables in the Gold layer
+    make gold
     ```
+
+  - **Access the Container Shell:**
+    For debugging or running ad-hoc commands.
+
+    ```bash
+    make shell
+    ```
+
+## Project File Structure
+
+The project is organized to separate concerns and improve maintainability.
+
+```
+.
+├── .dockerignore
+├── .env
+├── .env.example
+├── .gitignore
+├── .python-version
+├── docker-compose.yml
+├── Dockerfile
+├── Makefile
+├── pyproject.toml
+├── README.md
+├── requirements.txt
+├── uv.lock
+└── src
+    ├── config
+    │   └── settings.py
+    ├── contracts
+    │   └── arxiv_contract.py
+    ├── ingestion
+    │   ├── api_client.py
+    │   ├── main.py
+    │   └── writer.py
+    ├── transformation
+    │   ├── build_gold_layer.py
+    │   └── process_to_silver.py
+    └── utils
+        ├── logging_setup.py
+        └── spark_utils.py
+```
 
 ## Snowflake Integration
 
-The final Gold layer tables can be queried directly from Snowflake. This integration is achieved by creating key objects in Snowflake that securely point to your Data Lakehouse in S3.
+The Iceberg tables in the Gold layer can be queried directly from Snowflake as if they were native tables. This requires setting up a `STORAGE INTEGRATION` (to securely connect Snowflake to your S3) and a `CATALOG INTEGRATION` (to allow Snowflake to read the Iceberg metadata).
 
-### Setup Steps
-
-1.  **Configure AWS IAM:**
-    -   Create an IAM Policy that grants read/list permissions to your S3 bucket.
-    -   Create an IAM Role (`SnowflakeRole`) and attach the policy to it.
-    -   Configure the Role's Trust Policy to allow Snowflake's IAM user to assume it, using the `STORAGE_AWS_IAM_USER_ARN` and `STORAGE_AWS_EXTERNAL_ID` provided by Snowflake.
-
-2.  **Configure Snowflake:**
-    -   Create a `STORAGE INTEGRATION` that references the ARN of the IAM Role you created.
-    -   Create a `CATALOG INTEGRATION` to inform Snowflake that the table catalog is externally managed in S3.
-    -   Create `ICEBERG TABLE`s pointing to the metadata files of your Gold tables in S3.
-
-### Example SQL in Snowflake
-
-After setting up the integration, you can query your data with standard SQL:
+**Example Query in Snowflake after setup:**
 
 ```sql
--- Create the necessary objects in Snowflake
-USE ROLE ACCOUNTADMIN;
-
-CREATE OR REPLACE DATABASE ACADEMIC_LAKEHOUSE;
-CREATE OR REPLACE SCHEMA GOLD_LAYER;
-
-CREATE OR REPLACE EXTERNAL VOLUME your_external_volume
-  STORAGE_LOCATIONS =
-    (
-      (
-        NAME = 'your-s3-storage-location'
-        STORAGE_PROVIDER = 'S3'
-        STORAGE_BASE_URL = 's3://<your-s3-bucket-name>/'
-        STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::<your-aws-account-id>:role/<your-snowflake-iam-role>'
-      )
-    );
- 
-CREATE OR REPLACE CATALOG INTEGRATION your_iceberg_catalog_integration
-  CATALOG_SOURCE = OBJECT_STORE
-  TABLE_FORMAT = ICEBERG
-  ENABLED = TRUE;
-
-CREATE OR REPLACE ICEBERG TABLE your_gold_table
-  EXTERNAL_VOLUME = 'your_external_volume'
-  CATALOG = 'your_iceberg_catalog_integration'
-  METADATA_FILE_PATH = 'path/to/table/metadata/vX.metadata.json';
-
--- Refresh and query the table
-ALTER ICEBERG TABLE your_gold_table REFRESH 'path/to/table/metadata/vX.metadata.json';
-
-SELECT * FROM your_gold_table LIMIT 10;
+-- Querying the publication trends table
+SELECT
+    category_name,
+    SUM(paper_count) AS total_papers
+FROM analytics.fact_publication_trends
+WHERE publication_year > 2022
+GROUP BY category_name
+ORDER BY total_papers DESC
+LIMIT 10;
 ```
 
 ## Architectural Decisions
 
-  - **Why Iceberg over Delta Lake or Hudi?** Iceberg was chosen for its open, platform-independent metadata model, which avoids the vendor lock-in that can be associated with other solutions.
-  - **Why Spark for this data volume?** While the initial data volume from the arXiv API could be handled by Pandas/Polars, using Spark from the outset builds a scalable foundation. The architecture is ready to handle future growth in data volume without a complete redesign.
-  - **What business problem do ACID transactions solve here?** The ability to perform `UPDATE` and `DELETE` operations on the Data Lake simulates real-world scenarios where metadata must be corrected post-publication (e.g., correcting author names or categories). This is a critical capability impossible in a traditional Parquet-based Data Lake.
-
-## Future Evolution & Production Readiness
-
-This project uses a local Docker environment for development simplicity. The next logical step is to evolve the architecture for a production-ready, cloud-native environment.
-
-  - **Managed AWS Services:** Replace local Spark execution with **AWS Glue** or **Amazon EMR Serverless** for scalable, on-demand compute. The `Makefile` orchestration can be upgraded to **AWS Step Functions** or **Managed Workflows for Apache Airflow (MWAA)**.
-  - **Kubernetes (k8s):** For container-centric environments, the Spark jobs can be containerized and deployed on **Amazon EKS (Elastic Kubernetes Service)**, using the **Spark on k8s Operator** to manage the application lifecycle, providing resilience and standardized management.
-
-## File Structure
-
-```
-.
-├── docker-compose.yml
-├── Dockerfile
-├── .env
-├── .env.example
-├── .gitignore
-├── Makefile
-├── pyproject.toml
-├── .python-version
-├── README.md
-├── requirements.txt
-├── src
-│   ├── build_gold_layer.py
-│   ├── ingest_to_bronze.py
-│   └── process_to_silver.py
-└── uv.lock
-```
+  - **Why Iceberg?** Iceberg was chosen for its open, platform-independent metadata format, which avoids vendor lock-in, as well as its robust transactional guarantees (ACID) on the data lake.
+  - **Why Spark?** While the initial data volume could be handled by other libraries, using Spark from the outset builds a scalable foundation, ready for future growth without a complete architectural redesign.
+  - **Business Problem Solved:** The ability to perform `MERGE` (upsert) transactions simulates real-world scenarios where data must be corrected post-ingestion (e.g., fixing categories), a critical capability not offered by a traditional Parquet-based Data Lake.
