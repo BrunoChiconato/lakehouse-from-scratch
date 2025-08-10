@@ -20,7 +20,15 @@ class S3Writer:
         Converts a pandas DataFrame to Parquet in-memory and uploads it to S3.
         """
         parquet_buffer = io.BytesIO()
-        df.to_parquet(parquet_buffer, index=False, engine="pyarrow")
+
+        df.to_parquet(
+            parquet_buffer,
+            index=False,
+            engine="pyarrow",
+            coerce_timestamps="us",
+            allow_truncated_timestamps=True,
+        )
+
         final_size_mb = parquet_buffer.tell() / (1024 * 1024)
 
         logger.info(
