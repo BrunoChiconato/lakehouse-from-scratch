@@ -31,8 +31,12 @@ COPY --from=builder /opt/venv /opt/venv
 
 COPY src ./src
 
+COPY pyproject.toml .
+
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir -e .
+
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 RUN chown -R appuser:appgroup /app
 
-ENV PATH="/opt/venv/bin:$PATH"
 USER appuser
