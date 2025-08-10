@@ -3,11 +3,13 @@
 SERVICE_NAME=spark-dev
 ENV_FILE=--env-file .env
 
-DOCKER_EXEC_CMD = docker compose $(ENV_FILE) exec $(SERVICE_NAME)
+RUN_MODE ?= production
+
+DOCKER_EXEC_CMD = docker compose $(ENV_FILE) exec -e RUN_MODE=$(RUN_MODE) $(SERVICE_NAME)
 
 SPARK_CMD_PREFIX = spark-submit --packages "$$SPARK_PACKAGES"
 
-.PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline test test-cov
+.PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline test test-cov test-quality
 
 default: help
 
@@ -33,6 +35,7 @@ help:
 	@echo "  --- Testing ---"
 	@echo "  make test          	- Run all unit and integration tests with pytest"
 	@echo "  make test-cov      	- Run tests and generate an HTML coverage report"
+	@echo "  make test-quality  	- Run data quality tests on the generated pipeline data"
 
 
 build:
@@ -60,6 +63,7 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type d -name ".ruff_cache" -exec rm -rf {} +
+	find . -type d -name ".pytest_cache" -exec rm -rf {} +
 
 linter:
 	@echo "--> Linting and formatting code with Ruff..."
@@ -67,7 +71,7 @@ linter:
 	ruff format .
 
 bronze:
-	@echo "--> STEP 1: Ingesting raw data to Bronze layer..."
+	@echo "--> STEP 1: Ingesting raw data to Bronze layer (Mode: $(RUN_MODE))..."
 	$(DOCKER_EXEC_CMD) python src/ingestion/main.py
 
 silver:
@@ -82,10 +86,14 @@ run_full_pipeline: bronze silver gold
 	@echo "--> Full ETL pipeline finished successfully."
 
 test:
-	@echo "--> Running unit and integration tests..."
-	pytest tests/
+	@echo "--> Running unit and integration tests (excluding quality tests)..."
+	pytest -m "not quality" tests/
 
 test-cov:
-	@echo "--> Running tests and generating HTML coverage report..."
-	pytest --cov=src --cov-report=html tests/
+	@echo "--> Running tests and generating HTML coverage report (excluding quality tests)..."
+	pytest --cov=src --cov-report=html -m "not quality" tests/
 	@echo "--> Coverage report generated in 'htmlcov/' directory. Open htmlcov/index.html in your browser."
+
+test-quality:
+	@echo "--> Running Data Quality tests..."
+	pytest -m quality tests/
