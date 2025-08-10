@@ -24,3 +24,8 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "quality: marks tests as data quality tests (slow, requires pipeline run)",
+]
