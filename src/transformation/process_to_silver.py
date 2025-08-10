@@ -1,6 +1,18 @@
 import logging
+import boto3
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, year, to_date
+from pyspark.sql.functions import (
+    col,
+    year,
+    to_date,
+    expr,
+    explode,
+    split,
+    trim,
+    lower,
+    regexp_replace,
+    collect_list,
+)
 
 from config import settings
 from utils.logging_setup import setup_logging
@@ -45,12 +57,13 @@ def create_table_if_not_exists(spark: SparkSession, table_name: str) -> None:
 
 def transform_raw_data(spark: SparkSession, path: str) -> DataFrame:
     """
-    Reads compacted Parquet data from the Bronze layer and applies transformations.
+    Reads compacted Parquet data from the Bronze layer and applies a robust,
+    multi-step transformation and cleaning process to standardize categories.
     """
     logger.info(f"Reading raw data from {path}")
     df_raw = spark.read.parquet(path)
 
-    df_transformed = df_raw.select(
+    df_base = df_raw.select(
         col("id"),
         col("title"),
         col("summary"),
@@ -61,8 +74,50 @@ def transform_raw_data(spark: SparkSession, path: str) -> DataFrame:
         col("pdf_url"),
     ).withColumn("publication_year", year(col("published_date")))
 
-    logger.info("Raw data transformed successfully.")
-    return df_transformed
+    df_exploded_outer = df_base.withColumn("category_raw", explode(col("categories")))
+
+    df_exploded_inner = df_exploded_outer.withColumn(
+        "category_split", split(col("category_raw"), ",")
+    ).withColumn("category_single", explode(col("category_split")))
+
+    df_cleaned = df_exploded_inner.withColumn(
+        "category_cleaned",
+        lower(
+            trim(
+                regexp_replace(
+                    regexp_replace(col("category_single"), "\\s-.*", ""),
+                    "\\s*\\(.*\\)",
+                    "",
+                )
+            )
+        ),
+    )
+
+    df_standardized = df_cleaned.withColumn(
+        "category_standardized",
+        expr(
+            """
+            CASE
+                WHEN category_cleaned LIKE '%.%' THEN category_cleaned
+                ELSE concat(category_cleaned, '.gen')
+            END
+        """
+        ),
+    ).filter(col("category_standardized") != ".gen")
+
+    df_final_agg = df_standardized.groupBy(
+        "id",
+        "title",
+        "summary",
+        "authors",
+        "published_date",
+        "updated_date",
+        "pdf_url",
+        "publication_year",
+    ).agg(collect_list("category_standardized").alias("categories"))
+
+    logger.info("Raw data transformed successfully with robust category cleaning.")
+    return df_final_agg
 
 
 def upsert_to_silver(spark: SparkSession, df: DataFrame, table_name: str) -> None:
@@ -102,7 +157,20 @@ def main() -> None:
         df_transformed = transform_raw_data(spark, BRONZE_PATH)
         logger.info(f"Read and transformed {df_transformed.count()} records.")
 
+        try:
+            spark.sql(f"DROP TABLE IF EXISTS {SILVER_TABLE_FQN}")
+        except Exception:
+            glue = boto3.client("glue")
+            try:
+                glue.delete_table(DatabaseName="arxiv_db", Name="papers")
+            except glue.exceptions.EntityNotFoundException:
+                pass
+
         create_table_if_not_exists(spark, SILVER_TABLE_FQN)
+
+        if settings.RUN_MODE == "test":
+            logger.info("RUN_MODE=test: truncating Silver table before MERGE.")
+            spark.sql(f"TRUNCATE TABLE {SILVER_TABLE_FQN}")
 
         upsert_to_silver(spark, df_transformed, SILVER_TABLE_FQN)
 
