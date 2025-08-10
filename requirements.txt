@@ -11,7 +11,6 @@ identify==2.6.13
 idna==3.10
 iniconfig==2.1.0
 jmespath==1.0.1
--e file:///home/bruno/Jornada/lakehouse-from-scratch
 nodeenv==1.9.1
 numpy==2.3.2
 packaging==25.0
