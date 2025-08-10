@@ -28,7 +28,9 @@ def parse_xml_entry(entry) -> ArxivArticle:
             for author in entry.findall(f"{ATOM_NAMESPACE}author")
         ],
         "categories": [
-            cat.get("term") for cat in entry.findall(f"{ATOM_NAMESPACE}category")
+            (cat.get("term") or "").strip()
+            for cat in entry.findall(f"{ATOM_NAMESPACE}category")
+            if (cat.get("term") or "").strip() != ""
         ],
         "published_date": entry.find(f"{ATOM_NAMESPACE}published").text,
         "updated_date": entry.find(f"{ATOM_NAMESPACE}updated").text,
