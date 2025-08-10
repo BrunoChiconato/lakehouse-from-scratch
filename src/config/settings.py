@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+RUN_MODE = os.getenv("RUN_MODE", "production")
+
 LOG_FORMAT = os.getenv("LOG_FORMAT", "text")
 
 S3_BUCKET = os.getenv("S3_BUCKET_NAME")
@@ -53,7 +55,12 @@ CATEGORIES_TO_FETCH = [
     "cs.SY",
 ]
 
-TARGET_SIZE_MB = int(os.getenv("TARGET_SIZE_MB", "128"))
+if RUN_MODE == "test":
+    TARGET_SIZE_MB = 1
+    print(f"INFO: Running in TEST mode. Target size set to {TARGET_SIZE_MB}MB.")
+else:
+    TARGET_SIZE_MB = int(os.getenv("TARGET_SIZE_MB", "128"))
+
 TARGET_SIZE_BYTES = TARGET_SIZE_MB * 1024 * 1024
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1000"))
 API_SLEEP_SECONDS = int(os.getenv("API_SLEEP_SECONDS", "3"))
