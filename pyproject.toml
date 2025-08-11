@@ -7,26 +7,35 @@ name = "lakehouse-from-scratch"
 version = "0.1.0"
 description = "Data Lakehouse Project"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-    "boto3>=1.40.1",
     "pandas>=2.3.1",
-    "pre-commit>=4.3.0",
     "pyarrow>=21.0.0",
     "pydantic>=2.11.7",
-    "pyspark==3.5.1",
+    "requests>=2.32.4",
     "pytest>=8.4.1",
     "pytest-cov>=6.2.1",
     "pytest-mock>=3.14.1",
-    "python-dotenv>=1.1.1",
-    "requests>=2.32.4",
     "ruff>=0.12.7",
+    "urllib3>=2.5.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.pytest.ini_options]
-markers = [
-    "quality: marks tests as data quality tests (slow, requires pipeline run)",
+[project.optional-dependencies]
+dev = [
+  "pre-commit>=4.3.0",
+  "pytest>=8.4.1",
+  "pytest-cov>=6.2.1",
+  "pytest-mock>=3.14.1",
+  "python-dotenv>=1.1.1",
+  "ruff>=0.12.7",
+  "pyspark==3.5.1",
 ]
+
+[project.scripts]
+arxiv_bronze = "ingestion.main:cli"
+arxiv_silver = "transformation.process_to_silver:main"
+arxiv_gold = "transformation.build_gold_layer:main"
+arxiv_qa = "quality.qa_checks:main"
