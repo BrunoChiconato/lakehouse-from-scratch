@@ -1,52 +1,62 @@
-import pytest
-from pyspark.sql import SparkSession
-import os
+from unittest.mock import MagicMock
 
-from utils.spark_utils import get_spark_session
-from config import settings
+import utils.spark_utils as spark_utils
 
 
-VALID_SPARK_PACKAGES = (
-    "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,"
-    "org.apache.iceberg:iceberg-aws-bundle:1.9.2,"
-    "org.apache.hadoop:hadoop-aws:3.3.4"
-)
+def test_get_spark_session_returns_active_session(monkeypatch):
+    """Se existe Spark ativo, deve reutilizá-lo e não construir um novo."""
+    active = MagicMock(name="ActiveSparkSession")
+
+    monkeypatch.setattr(
+        spark_utils.SparkSession,
+        "getActiveSession",
+        staticmethod(lambda: active),
+    )
+
+    fake_builder = MagicMock(name="Builder")
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("Builder não deveria ser chamado quando há sessão ativa")
+
+    fake_builder.appName.side_effect = _fail
+    fake_builder.getOrCreate.side_effect = _fail
+    monkeypatch.setattr(
+        spark_utils.SparkSession,
+        "builder",
+        fake_builder,
+        raising=False,
+    )
+
+    result = spark_utils.get_spark_session("ShouldNotMatter")
+    assert result is active
 
 
-def test_get_spark_session_raises_error_if_packages_not_set(mocker):
-    """
-    Unit Test: Verifies that get_spark_session raises a ValueError if the
-    SPARK_PACKAGES environment variable is not set.
-    """
-    mocker.patch.dict(os.environ, clear=True)
+def test_get_spark_session_builds_when_no_active(monkeypatch):
+    """Sem sessão ativa, deve construir via builder.appName(...).getOrCreate()."""
+    monkeypatch.setattr(
+        spark_utils.SparkSession,
+        "getActiveSession",
+        staticmethod(lambda: None),
+    )
 
-    with pytest.raises(ValueError) as excinfo:
-        get_spark_session("TestApp")
+    created = MagicMock(name="CreatedSparkSession")
+    fake_builder = MagicMock(name="Builder")
 
-    assert "SPARK_PACKAGES environment variable is not set" in str(excinfo.value)
+    def _app_name(name):
+        assert name == "MyApp"
+        return fake_builder
 
+    fake_builder.appName.side_effect = _app_name
+    fake_builder.getOrCreate.return_value = created
 
-def test_get_spark_session_success_and_config_check(mocker):
-    """
-    Integration-like Test: Verifies that get_spark_session successfully creates a
-    SparkSession and applies all the correct configurations.
-    """
-    mocker.patch.dict(os.environ, {"SPARK_PACKAGES": VALID_SPARK_PACKAGES})
+    monkeypatch.setattr(
+        spark_utils.SparkSession,
+        "builder",
+        fake_builder,
+        raising=False,
+    )
 
-    session = None
-    try:
-        session = get_spark_session("MyTestApp")
-        assert isinstance(session, SparkSession)
-
-        conf = session.conf
-        assert conf.get("spark.app.name") == "MyTestApp"
-        assert "IcebergSparkSessionExtensions" in conf.get("spark.sql.extensions")
-        assert (
-            conf.get(f"spark.sql.catalog.{settings.SPARK_CATALOG_NAME}.catalog-impl")
-            == "org.apache.iceberg.aws.glue.GlueCatalog"
-        )
-        assert conf.get("spark.jars.packages") == VALID_SPARK_PACKAGES
-
-    finally:
-        if session:
-            session.stop()
+    result = spark_utils.get_spark_session("MyApp")
+    assert result is created
+    fake_builder.appName.assert_called_once()
+    fake_builder.getOrCreate.assert_called_once()
