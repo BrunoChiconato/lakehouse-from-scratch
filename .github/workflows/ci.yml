@@ -73,7 +73,7 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
-          databricks bundle deploy -t dev -v wheel_file_name="${{ env.WHEEL_NAME }}"
+          databricks bundle deploy -t dev --var "wheel_file_name=${{ env.WHEEL_NAME }}"
 
       - name: Run pipeline (bronze→silver→gold→qa)
         env:
