@@ -1,13 +1,18 @@
 import os
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+
+    def load_dotenv(*args, **kwargs):
+        return False
+
 
 load_dotenv()
 
 RUN_MODE = os.getenv("RUN_MODE", "production")
 
 LOG_FORMAT = os.getenv("LOG_FORMAT", "text")
-
-S3_BUCKET = os.getenv("S3_BUCKET_NAME")
 
 ARXIV_BASE_URL = "http://export.arxiv.org/api/query"
 ARXIV_SORT_BY = "submittedDate"
@@ -55,18 +60,18 @@ CATEGORIES_TO_FETCH = [
     "cs.SY",
 ]
 
+UC_CATALOG = os.getenv("UC_CATALOG", "lakehouse")
+BRONZE_SCHEMA = "bronze"
+SILVER_SCHEMA = "arxiv_db"
+GOLD_SCHEMA = "analytics"
+
+SPARK_CATALOG_NAME = UC_CATALOG
+
 if RUN_MODE == "test":
     TARGET_SIZE_MB = 1
-    print(f"INFO: Running in TEST mode. Target size set to {TARGET_SIZE_MB}MB.")
 else:
     TARGET_SIZE_MB = int(os.getenv("TARGET_SIZE_MB", "128"))
 
 TARGET_SIZE_BYTES = TARGET_SIZE_MB * 1024 * 1024
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1000"))
 API_SLEEP_SECONDS = int(os.getenv("API_SLEEP_SECONDS", "3"))
-BRONZE_OUTPUT_KEY = f"bronze/articles_parquet/data_all_cs_{TARGET_SIZE_MB}MB.parquet"
-
-DEFAULT_WAREHOUSE_PATH = f"s3a://{S3_BUCKET}/warehouse"
-DEFAULT_CATALOG_NAME = "lakehouse_catalog"
-SPARK_CATALOG_NAME = os.getenv("SPARK_CATALOG_NAME", DEFAULT_CATALOG_NAME)
-SPARK_WAREHOUSE_PATH = os.getenv("SPARK_WAREHOUSE_PATH", DEFAULT_WAREHOUSE_PATH)
