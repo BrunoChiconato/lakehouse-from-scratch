@@ -15,7 +15,7 @@ def test_setup_database_creates_database(monkeypatch):
 
     p2s.setup_database(spark, "silver")
 
-    spark.sql.assert_called_once_with("CREATE DATABASE IF NOT EXISTS lakehouse.silver")
+    spark.sql.assert_called_once_with("CREATE SCHEMA IF NOT EXISTS lakehouse.silver")
 
 
 def test_create_table_if_not_exists_executes_expected_ddl(monkeypatch):
