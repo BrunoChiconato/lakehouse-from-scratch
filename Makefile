@@ -1,62 +1,19 @@
 #!/usr/bin/bash
 
-SERVICE_NAME=spark-dev
-ENV_FILE=--env-file .env
-
-RUN_MODE ?= production
-
-DOCKER_EXEC_CMD = docker compose $(ENV_FILE) exec -e RUN_MODE=$(RUN_MODE) $(SERVICE_NAME)
-
-SPARK_CMD_PREFIX = spark-submit --packages "$$SPARK_PACKAGES"
-
-.PHONY: help build up down logs shell clean linter bronze silver gold run_full_pipeline test test-cov test-quality
+.PHONY: help clean linter test test-cov
 
 default: help
 
 help:
 	@echo "Available commands:"
 	@echo "  --- Environment Control ---"
-	@echo "  make build         	- Build the Docker image with all dependencies"
-	@echo "  make up            	- Start Docker services in the background"
-	@echo "  make down          	- Stop and remove Docker containers"
-	@echo "  make logs          	- Follow service logs"
-	@echo "  make shell         	- Open an interactive shell inside the development container"
 	@echo "  make clean         	- Remove __pycache__ and .ruff_cache dirs and .pyc files"
 	@echo "  make linter      	- Run linter and formatter (Ruff) on the project"
-	@echo ""
-	@echo "  --- ETL Pipeline Steps ---"
-	@echo "  make bronze 		- (Step 1) Ingest raw data from API to Bronze layer"
-	@echo "  make silver		- (Step 2) Process Bronze data into Silver layer (Iceberg table)"
-	@echo "  make gold    		- (Step 3) Build aggregated Gold layer tables from Silver layer"
-	@echo ""
-	@echo "  --- Full Pipeline Execution ---"
-	@echo "  make run_full_pipeline 	- Run all ETL steps in sequence (Bronze -> Silver -> Gold)"
 	@echo ""
 	@echo "  --- Testing ---"
 	@echo "  make test          	- Run all unit and integration tests with pytest"
 	@echo "  make test-cov      	- Run tests and generate an HTML coverage report"
-	@echo "  make test-quality  	- Run data quality tests on the generated pipeline data"
 
-
-build:
-	@echo "--> Building Docker environment..."
-	docker compose build
-
-up:
-	@echo "--> Starting Docker services..."
-	docker compose up -d
-
-down:
-	@echo "--> Stopping Docker services..."
-	docker compose down --volumes
-
-logs:
-	@echo "--> Following logs..."
-	docker compose logs -f
-
-shell:
-	@echo "--> Accessing container shell..."
-	$(DOCKER_EXEC_CMD) bash
 
 clean:
 	@echo "--> Cleaning up temporary files..."
@@ -70,30 +27,11 @@ linter:
 	ruff check . --fix
 	ruff format .
 
-bronze:
-	@echo "--> STEP 1: Ingesting raw data to Bronze layer (Mode: $(RUN_MODE))..."
-	$(DOCKER_EXEC_CMD) python src/ingestion/main.py
-
-silver:
-	@echo "--> STEP 2: Processing data from Bronze to Silver layer..."
-	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/transformation/process_to_silver.py'
-
-gold:
-	@echo "--> STEP 3: Building aggregated Gold layer tables..."
-	$(DOCKER_EXEC_CMD) bash -c '$(SPARK_CMD_PREFIX) src/transformation/build_gold_layer.py'
-
-run_full_pipeline: bronze silver gold
-	@echo "--> Full ETL pipeline finished successfully."
-
 test:
-	@echo "--> Running unit and integration tests (excluding quality tests)..."
-	pytest -m "not quality" tests/
+	@echo "--> Running unit and integration tests..."
+	pytest tests/
 
 test-cov:
-	@echo "--> Running tests and generating HTML coverage report (excluding quality tests)..."
-	pytest --cov=src --cov-report=html -m "not quality" tests/
+	@echo "--> Running tests and generating HTML coverage report..."
+	pytest --cov=src --cov-report=html tests/
 	@echo "--> Coverage report generated in 'htmlcov/' directory. Open htmlcov/index.html in your browser."
-
-test-quality:
-	@echo "--> Running Data Quality tests..."
-	pytest -m quality tests/
