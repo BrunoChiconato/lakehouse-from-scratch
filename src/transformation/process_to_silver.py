@@ -1,5 +1,4 @@
 import logging
-import boto3
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
     col,
@@ -21,20 +20,19 @@ from utils.spark_utils import get_spark_session
 setup_logging()
 logger = logging.getLogger(__name__)
 
-DB_NAME = "arxiv_db"
-TABLE_NAME = "papers"
-SILVER_TABLE_FQN = f"{settings.SPARK_CATALOG_NAME}.{DB_NAME}.{TABLE_NAME}"
-BRONZE_PATH = f"s3a://{settings.S3_BUCKET}/bronze/articles_parquet/"
+
+SILVER_TABLE_FQN = f"{settings.SPARK_CATALOG_NAME}.{settings.SILVER_SCHEMA}.papers"
+BRONZE_TABLE_FQN = f"{settings.SPARK_CATALOG_NAME}.{settings.BRONZE_SCHEMA}.arxiv_raw"
 
 
 def setup_database(spark: SparkSession, db_name: str) -> None:
     """Ensures the database exists in the catalog."""
-    spark.sql(f"CREATE DATABASE IF NOT EXISTS {settings.SPARK_CATALOG_NAME}.{db_name}")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {settings.SPARK_CATALOG_NAME}.{db_name}")
 
 
 def create_table_if_not_exists(spark: SparkSession, table_name: str) -> None:
     """
-    Creates the Silver Iceberg table with an explicit schema if it does not already exist.
+    Creates the Silver Delta table with an explicit schema if it does not already exist.
     """
     logger.info(f"Ensuring table '{table_name}' exists with the correct schema.")
     create_table_sql = f"""
@@ -49,19 +47,18 @@ def create_table_if_not_exists(spark: SparkSession, table_name: str) -> None:
         pdf_url STRING,
         publication_year INT
     )
-    USING iceberg
+    USING delta
     PARTITIONED BY (publication_year)
     """
     spark.sql(create_table_sql)
 
 
-def transform_raw_data(spark: SparkSession, path: str) -> DataFrame:
+def transform_raw_data(spark: SparkSession, source_table: str) -> DataFrame:
     """
-    Reads compacted Parquet data from the Bronze layer and applies a robust,
-    multi-step transformation and cleaning process to standardize categories.
+    Reads Bronze Delta table and applies a robust, multi-step transformation and cleaning process to standardize categories.
     """
-    logger.info(f"Reading raw data from {path}")
-    df_raw = spark.read.parquet(path)
+    logger.info(f"Reading raw data from table {source_table}")
+    df_raw = spark.sql(f"SELECT * FROM {source_table}")
 
     df_base = df_raw.select(
         col("id"),
@@ -142,47 +139,24 @@ def upsert_to_silver(spark: SparkSession, df: DataFrame, table_name: str) -> Non
 
 def main() -> None:
     """Main ETL job to process data from Bronze to the Silver layer."""
-    if not settings.S3_BUCKET:
-        logger.error("S3_BUCKET_NAME environment variable not set. Aborting.")
-        return
+    spark = get_spark_session("BronzeToSilver")
+    logger.info("Spark Session created successfully.")
 
-    spark = None
-    try:
-        spark = get_spark_session("BronzeToSilver")
-        logger.info("Spark Session created successfully.")
+    spark.sql(f"USE CATALOG {settings.SPARK_CATALOG_NAME}")
+    spark.sql(
+        f"CREATE SCHEMA IF NOT EXISTS {settings.SPARK_CATALOG_NAME}.{settings.SILVER_SCHEMA}"
+    )
 
-        setup_database(spark, DB_NAME)
-        logger.info(f"Database '{DB_NAME}' is ready.")
+    df_transformed = transform_raw_data(spark, BRONZE_TABLE_FQN)
+    logger.info(f"Read and transformed {df_transformed.count()} records.")
 
-        df_transformed = transform_raw_data(spark, BRONZE_PATH)
-        logger.info(f"Read and transformed {df_transformed.count()} records.")
+    create_table_if_not_exists(spark, SILVER_TABLE_FQN)
 
-        try:
-            spark.sql(f"DROP TABLE IF EXISTS {SILVER_TABLE_FQN}")
-        except Exception:
-            glue = boto3.client("glue")
-            try:
-                glue.delete_table(DatabaseName="arxiv_db", Name="papers")
-            except glue.exceptions.EntityNotFoundException:
-                pass
+    if settings.RUN_MODE == "test":
+        logger.info("RUN_MODE=test: truncating Silver table before MERGE.")
+        spark.sql(f"TRUNCATE TABLE {SILVER_TABLE_FQN}")
 
-        create_table_if_not_exists(spark, SILVER_TABLE_FQN)
-
-        if settings.RUN_MODE == "test":
-            logger.info("RUN_MODE=test: truncating Silver table before MERGE.")
-            spark.sql(f"TRUNCATE TABLE {SILVER_TABLE_FQN}")
-
-        upsert_to_silver(spark, df_transformed, SILVER_TABLE_FQN)
-
-    except Exception as e:
-        logger.error(
-            f"An error occurred during the Bronze-to-Silver job: {e}", exc_info=True
-        )
-        raise
-    finally:
-        if spark:
-            spark.stop()
-            logger.info("Spark session stopped.")
+    upsert_to_silver(spark, df_transformed, SILVER_TABLE_FQN)
 
 
 if __name__ == "__main__":
