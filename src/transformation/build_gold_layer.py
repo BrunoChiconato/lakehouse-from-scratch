@@ -1,6 +1,6 @@
 import logging
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, count, explode
+from pyspark.sql.functions import col, count, explode, broadcast, lower, coalesce
 
 from config import settings
 from utils.logging_setup import setup_logging
@@ -9,9 +9,9 @@ from utils.spark_utils import get_spark_session
 setup_logging()
 logger = logging.getLogger(__name__)
 
-SILVER_DB = "arxiv_db"
+SILVER_DB = settings.SILVER_SCHEMA
 SILVER_TABLE = "papers"
-GOLD_DB = "analytics"
+GOLD_DB = settings.GOLD_SCHEMA
 DIM_CATEGORIES_TABLE = "dim_categories"
 FACT_PUBLICATION_TRENDS_TABLE = "fact_publication_trends"
 
@@ -25,8 +25,8 @@ FACT_PUBLICATION_TRENDS_TABLE_FQN = (
 
 
 def setup_database(spark: SparkSession, db_name: str) -> None:
-    """Ensures the database exists in the catalog."""
-    spark.sql(f"CREATE DATABASE IF NOT EXISTS {settings.SPARK_CATALOG_NAME}.{db_name}")
+    """Ensures the schema exists in the Unity Catalog."""
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {settings.SPARK_CATALOG_NAME}.{db_name}")
     logger.info(f"Database '{db_name}' is ready.")
 
 
@@ -34,12 +34,11 @@ def create_categories_dimension_table(
     spark: SparkSession, table_name_fqn: str
 ) -> DataFrame:
     """
-    Creates and saves a dimension table to translate arXiv category codes
-    into human-readable names.
+    Creates and saves the categories dimension table (code -> readable name).
     """
     logger.info("Creating category dimension table.")
 
-    categories_data = [(cat, "") for cat in settings.CATEGORIES_TO_FETCH]
+    categories_data = [(code, "") for code in settings.CATEGORIES_TO_FETCH]
 
     category_name_map = {
         "cs.AI": "Artificial Intelligence",
@@ -98,29 +97,42 @@ def create_categories_dimension_table(
     return dim_df
 
 
-def create_publication_trends_fact_table(
-    papers_df: DataFrame, categories_df: DataFrame, table_name_fqn: str
-) -> None:
+def compute_publication_trends_df(
+    papers_df: DataFrame, categories_df: DataFrame
+) -> DataFrame:
     """
-    Creates an aggregated fact table with publication counts per year and
-    human-readable category name.
+    Returns the trends DataFrame (year x category) without saving it.
+    - Case-insensitive join (normalizes codes to lowercase)
+    - Ensures category_name is not null via coalesce
     """
-    logger.info("Exploding paper categories for analysis.")
     papers_with_exploded_categories = papers_df.withColumn(
         "category_code", explode(col("categories"))
-    )
+    ).withColumn("category_code_lc", lower(col("category_code")))
 
-    logger.info("Joining papers with category dimension table.")
+    categories_df_norm = categories_df.withColumn(
+        "category_code_lc", lower(col("category_code"))
+    ).select("category_code_lc", "category_name")
+
     enriched_papers = papers_with_exploded_categories.join(
-        categories_df, "category_code", "left"
-    )
+        broadcast(categories_df_norm), "category_code_lc", "left"
+    ).withColumn("category_name", coalesce(col("category_name"), col("category_code")))
 
-    logger.info("Aggregating data to create publication trends.")
     trends_df = (
         enriched_papers.groupBy("publication_year", "category_name")
         .agg(count("id").alias("paper_count"))
         .orderBy(col("publication_year").desc(), col("paper_count").desc())
     )
+    return trends_df
+
+
+def create_publication_trends_fact_table(
+    papers_df: DataFrame, categories_df: DataFrame, table_name_fqn: str
+) -> None:
+    """
+    Creates and saves the fact table (Gold) partitioned by publication year.
+    """
+    logger.info("Aggregating data to create publication trends.")
+    trends_df = compute_publication_trends_df(papers_df, categories_df)
 
     logger.info(f"Saving aggregated fact table to: {table_name_fqn}")
     (
@@ -132,15 +144,10 @@ def create_publication_trends_fact_table(
 
 
 def main() -> None:
-    """Main function to build all Gold layer tables."""
-    if not settings.S3_BUCKET:
-        logger.error("S3_BUCKET_NAME environment variable not set. Aborting.")
-        return
-
-    spark = None
-    papers_df = None
+    """Gold job compatible with Serverless (no cache/persist)."""
     try:
         spark = get_spark_session("SilverToGold")
+        spark.sql(f"USE CATALOG {settings.SPARK_CATALOG_NAME}")
         logger.info("Spark session created successfully.")
 
         setup_database(spark, GOLD_DB)
@@ -151,8 +158,9 @@ def main() -> None:
         )
 
         logger.info(f"Reading data from Silver table: {SILVER_TABLE_FQN}")
-        papers_df = spark.table(SILVER_TABLE_FQN).cache()
-        logger.info(f"Silver table with {papers_df.count()} records loaded and cached.")
+        papers_df = spark.table(SILVER_TABLE_FQN)
+        row_count = papers_df.count()
+        logger.info(f"Silver table loaded with {row_count} records.")
 
         logger.info(f"Building Gold fact table: {FACT_PUBLICATION_TRENDS_TABLE_FQN}")
         create_publication_trends_fact_table(
@@ -163,13 +171,6 @@ def main() -> None:
     except Exception as e:
         logger.error(f"An error occurred during the Gold layer job: {e}", exc_info=True)
         raise
-    finally:
-        if spark:
-            if papers_df is not None and papers_df.is_cached:
-                papers_df.unpersist()
-                logger.info("Unpersisted Silver table DataFrame.")
-            spark.stop()
-            logger.info("Spark session stopped.")
 
 
 if __name__ == "__main__":
