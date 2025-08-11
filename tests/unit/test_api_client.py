@@ -8,7 +8,7 @@ from config import settings
 
 def test_arxiv_api_client_initialization():
     """
-    Verifica se o client usa a base URL de settings.
+    Verifies that the client uses the base URL from settings.
     """
     client = ArxivAPIClient()
     assert client.base_url == settings.ARXIV_BASE_URL
@@ -16,8 +16,8 @@ def test_arxiv_api_client_initialization():
 
 def test_fetch_batch_success(mocker):
     """
-    Verifica o fetch_batch em caso de sucesso.
-    Faz patch em requests.Session.get (não requests.get).
+    Verifies fetch_batch in case of success.
+    Patches requests.Session.get (not requests.get).
     """
     mock_get = mocker.patch("ingestion.api_client.requests.Session.get")
 
@@ -48,7 +48,7 @@ def test_fetch_batch_success(mocker):
 
 def test_fetch_batch_failure_raises_exception(mocker):
     """
-    Verifica se fetch_batch propaga exceção quando a chamada falha.
+    Verifies that fetch_batch propagates an exception when the call fails.
     """
     mocker.patch(
         "ingestion.api_client.requests.Session.get",
