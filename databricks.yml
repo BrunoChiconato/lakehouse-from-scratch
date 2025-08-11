@@ -1,0 +1,69 @@
+bundle:
+  name: arxiv-lakehouse
+  workspace:
+    root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+
+variables:
+  wheel_file_name:
+    description: "Nome do wheel gerado em dist/ (passado no deploy)"
+    default: ""
+
+files:
+  - source: dist/**
+
+sync:
+  include:
+    - dist/*
+
+artifacts:
+  default:
+    type: whl
+    build: python -m build --wheel
+    path: .
+
+resources:
+  jobs:
+    lakehouse-pipeline:
+      name: lakehouse-pipeline
+
+      tasks:
+        - task_key: bronze
+          python_wheel_task:
+            package_name: lakehouse-from-scratch
+            entry_point: arxiv_bronze
+            parameters: ["--target-size-mb", "32", "--batch-size", "1000"]
+          environment_key: serverless
+
+        - task_key: silver
+          depends_on: [{ task_key: bronze }]
+          python_wheel_task:
+            package_name: lakehouse-from-scratch
+            entry_point: arxiv_silver
+          environment_key: serverless
+
+        - task_key: gold
+          depends_on: [{ task_key: silver }]
+          python_wheel_task:
+            package_name: lakehouse-from-scratch
+            entry_point: arxiv_gold
+          environment_key: serverless
+
+        - task_key: qa
+          depends_on: [{ task_key: gold }]
+          python_wheel_task:
+            package_name: lakehouse-from-scratch
+            entry_point: arxiv_qa
+          environment_key: serverless
+
+      environments:
+        - environment_key: serverless
+          spec:
+            environment_version: 3
+            dependencies:
+              - ${workspace.file_path}/dist/${var.wheel_file_name}
+
+targets:
+  dev:
+    default: true
+    workspace:
+      profile: dev
